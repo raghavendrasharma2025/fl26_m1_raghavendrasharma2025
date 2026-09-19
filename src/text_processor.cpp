@@ -1,9 +1,18 @@
 #include "aiws/text_processor.hpp"
 
-#include <cctype>
 #include <stdexcept>
 
 namespace aiws {
+
+namespace {
+
+bool is_ascii_alnum(unsigned char ch) {
+    return (ch >= 'A' && ch <= 'Z') ||
+           (ch >= 'a' && ch <= 'z') ||
+           (ch >= '0' && ch <= '9');
+}
+
+}  // namespace
 
 std::vector<TokenInfo> TextProcessor::tokenize(const std::string& text) {
     std::vector<TokenInfo> tokens;
@@ -12,67 +21,72 @@ std::vector<TokenInfo> TextProcessor::tokenize(const std::string& text) {
     std::size_t i = 0;
 
     while (i < text.size()) {
+        bool paragraph_break = false;
+        bool have_newline = false;
+        bool only_spaces_tabs_since_newline = true;
 
-        // Check for paragraph boundaries while processing separators.
-        if (text[i] == '\n' || text[i] == '\r') {
-            std::size_t j = i;
+        // Process separators before the next token.
+        while (i < text.size() &&
+               !is_ascii_alnum(static_cast<unsigned char>(text[i]))) {
 
-            // Consume first newline.
-            if (text[j] == '\r' &&
-                j + 1 < text.size() &&
-                text[j + 1] == '\n') {
-                j += 2;
-            } else {
-                ++j;
-            }
+            unsigned char ch =
+                static_cast<unsigned char>(text[i]);
 
-            // Spaces/tabs are allowed between the two newlines.
-            while (j < text.size() &&
-                   (text[j] == ' ' || text[j] == '\t')) {
-                ++j;
-            }
-
-            // Check for second newline.
-            bool blank_line = false;
-
-            if (j < text.size()) {
-                if (text[j] == '\n') {
-                    blank_line = true;
-                } else if (text[j] == '\r') {
-                    blank_line = true;
+            // Treat LF and CRLF consistently as newline events.
+            if (ch == '\n' || ch == '\r') {
+                if (have_newline &&
+                    only_spaces_tabs_since_newline) {
+                    paragraph_break = true;
                 }
-            }
 
-            if (blank_line) {
-                ++paragraph;
+                have_newline = true;
+                only_spaces_tabs_since_newline = true;
+
+                // Consume CRLF as one newline.
+                if (ch == '\r' &&
+                    i + 1 < text.size() &&
+                    text[i + 1] == '\n') {
+                    i += 2;
+                } else {
+                    ++i;
+                }
+            } else {
+                // Spaces and tabs may appear between the two
+                // newlines of a blank line.
+                if (ch != ' ' && ch != '\t') {
+                    have_newline = false;
+                    only_spaces_tabs_since_newline = true;
+                }
+
+                ++i;
             }
         }
 
-        unsigned char ch = static_cast<unsigned char>(text[i]);
+        if (i >= text.size()) {
+            break;
+        }
 
-        // Skip separators.
-        if (!((ch >= 'A' && ch <= 'Z') ||
-              (ch >= 'a' && ch <= 'z') ||
-              (ch >= '0' && ch <= '9'))) {
-            ++i;
-            continue;
+        // Do not count blank lines before the first real paragraph.
+        if (paragraph_break && !tokens.empty()) {
+            ++paragraph;
         }
 
         std::size_t begin = i;
         std::string token;
 
-        // Build one normalized token.
         while (i < text.size()) {
-            unsigned char current =
+            unsigned char ch =
                 static_cast<unsigned char>(text[i]);
 
-            if (current >= 'A' && current <= 'Z') {
-                token += static_cast<char>(current - 'A' + 'a');
-            } else if ((current >= 'a' && current <= 'z') ||
-                       (current >= '0' && current <= '9')) {
-                token += static_cast<char>(current);
-            } else {
+            if (!is_ascii_alnum(ch)) {
                 break;
+            }
+
+            if (ch >= 'A' && ch <= 'Z') {
+                token += static_cast<char>(
+                    ch - 'A' + 'a');
+            } else {
+                token += static_cast<char>(ch);
             }
 
             ++i;
@@ -86,7 +100,6 @@ std::vector<TokenInfo> TextProcessor::tokenize(const std::string& text) {
 
     return tokens;
 }
-
 
 std::vector<std::string> TextProcessor::terms(
     const std::string& text) {
@@ -103,7 +116,6 @@ std::vector<std::string> TextProcessor::terms(
     return result;
 }
 
-
 std::string TextProcessor::normalize(
     const std::string& text) {
 
@@ -111,7 +123,6 @@ std::string TextProcessor::normalize(
 
     return join(tokens, 0, tokens.size());
 }
-
 
 std::string TextProcessor::join(
     const std::vector<TokenInfo>& tokens,
@@ -134,7 +145,6 @@ std::string TextProcessor::join(
 
     return result;
 }
-
 
 std::string TextProcessor::join(
     const std::vector<std::string>& tokens,
